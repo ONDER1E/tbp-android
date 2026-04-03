@@ -50,7 +50,6 @@ Instead of polling every 5 seconds, the app registers for Android's `ACTION_BATT
    ```powershell
    git clone [https://github.com/ONDER1E/tbp-android.git](https://github.com/ONDER1E/tbp-android.git)
    cd tbp-android
-```
 
 2.  Build the Debug APK:
     ```powershell
