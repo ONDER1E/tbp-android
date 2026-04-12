@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import java.security.MessageDigest
 
 plugins {
     id("com.android.application")
@@ -30,8 +31,8 @@ android {
         applicationId = "com.onder1e.usbpdbs"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.2.0"
+        versionCode = 2 // Updated for v2.0.0
+        versionName = "2.0.0"
     }
 
     buildTypes {
@@ -44,15 +45,33 @@ android {
             )
         }
         debug {
-            // Optional: specify debug signing if you want to keep them distinct
             signingConfig = signingConfigs.getByName("debug")
         }
     }
 
     applicationVariants.all {
+        val variant = this
+        val variantName = name
+        
         outputs.all {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            output.outputFileName = "USB_PD_Bypass_Script_v${versionName}.apk"
+            output.outputFileName = "USB_PD_Bypass_Script_v${variant.versionName}.apk"
+        }
+
+        if (variantName == "release") {
+            assembleProvider.get().doLast {
+                // We go through the variant's outputs specifically to find the file
+                variant.outputs.forEach { output ->
+                    val outputFile = output.outputFile
+                    if (outputFile.exists()) {
+                        println("\n-------------------------------------------------------")
+                        println("BUILD SUCCESSFUL: ${outputFile.name}")
+                        println("MD5: " + calculateHash(outputFile, "MD5"))
+                        println("SHA-256: " + calculateHash(outputFile, "SHA-256"))
+                        println("-------------------------------------------------------\n")
+                    }
+                }
+            }
         }
     }
 
@@ -66,6 +85,20 @@ android {
     buildFeatures {
         viewBinding = true
     }
+}
+
+// Helper function for hashing
+fun calculateHash(file: File, algorithm: String): String {
+    val digest = MessageDigest.getInstance(algorithm)
+    file.inputStream().use { input ->
+        val buffer = ByteArray(8192)
+        var bytesRead = input.read(buffer)
+        while (bytesRead != -1) {
+            digest.update(buffer, 0, bytesRead)
+            bytesRead = input.read(buffer)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
 }
 
 dependencies {
