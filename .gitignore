@@ -20,3 +20,10 @@ wifi_test.txt
 # settings.gradle.kts
 # gradlew
 # gradlew.bat
+
+# Android Signing Keys
+*.jks
+*.keystore
+
+# Local environment configs (contains passwords)
+local.properties

@@ -1,6 +1,11 @@
 package com.onder1e.usbpdbs
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.google.android.material.bottomnavigation.BottomNavigationView
@@ -15,7 +20,6 @@ class MainActivity : AppCompatActivity() {
 
     private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
         updateShizukuStatus()
-        // Refresh permissions fragment if visible
         if (supportFragmentManager.findFragmentById(R.id.fragmentContainer) is PermissionsFragment) {
             permissionsFragment.onResume()
         }
@@ -27,7 +31,14 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         bottomNav = findViewById(R.id.bottomNav)
-        loadFragment(mainFragment)
+        
+        // --- ADDED REDIRECT LOGIC ---
+        if (!hasAllPermissions()) {
+            loadFragment(permissionsFragment)
+            bottomNav.selectedItemId = R.id.nav_permissions
+        } else {
+            loadFragment(mainFragment)
+        }
 
         bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
@@ -40,9 +51,20 @@ class MainActivity : AppCompatActivity() {
 
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         updateShizukuStatus()
-
-        // Handle intent from notification (e.g. tab=permissions)
         handleIntent(intent)
+    }
+
+    // Helper to determine if we need to force the permissions tab
+    private fun hasAllPermissions(): Boolean {
+        val secureSettings = checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") == PackageManager.PERMISSION_GRANTED
+        val termuxPerm = checkSelfPermission("com.termux.permission.RUN_COMMAND") == PackageManager.PERMISSION_GRANTED
+        val overlay = Settings.canDrawOverlays(this)
+        val notifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else true
+        val battery = (getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
+
+        return secureSettings && termuxPerm && overlay && notifications && battery
     }
 
     override fun onNewIntent(intent: android.content.Intent?) {
@@ -65,7 +87,7 @@ class MainActivity : AppCompatActivity() {
     fun updateShizukuStatus() {
         try {
             val running = Shizuku.pingBinder()
-            val granted = Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
             val status = when {
                 !running -> "Shizuku: Not running"
                 !granted -> "Shizuku: Permission not granted -- tap Start to request"
@@ -79,8 +101,7 @@ class MainActivity : AppCompatActivity() {
 
     fun requestShizukuIfNeeded() {
         try {
-            if (Shizuku.pingBinder() &&
-                Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
                 Shizuku.requestPermission(1001)
             }
         } catch (e: Exception) {}

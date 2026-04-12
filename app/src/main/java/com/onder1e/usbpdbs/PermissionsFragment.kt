@@ -1,230 +1,227 @@
 package com.onder1e.usbpdbs
 
-import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
+import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import rikka.shizuku.Shizuku
 import java.io.File
 
 class PermissionsFragment : Fragment() {
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View? = inflater.inflate(R.layout.fragment_permissions, container, false)
+    private lateinit var container: LinearLayout
+    private val darkGreyText = 0xFF212121.toInt() // Matches main button text
+    private val whiteText = 0xFFFFFFFF.toInt()
+    private val disabledBg = 0xFF555555.toInt() // Dark grey background for "Granted"
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> refreshUI() }
+
+    data class PermissionItem(
+        val title: String,
+        val isGranted: Boolean,
+        val canBeGrantedViaRish: Boolean = false,
+        val adbCommand: String = "",
+        val action: () -> Unit
+    )
+
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? =
+        inflater.inflate(R.layout.fragment_permissions, container, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        setupPermissions(view)
+        container = view.findViewById(R.id.permissionContainer)
+        refreshUI()
     }
 
     override fun onResume() {
         super.onResume()
-        view?.let { setupPermissions(it) }
+        refreshUI()
     }
 
-    private fun setupPermissions(view: View) {
-        val ctx = context ?: return
+    private fun getThemeColor(attr: Int): Int {
+        val typedValue = TypedValue()
+        context?.theme?.resolveAttribute(attr, typedValue, true)
+        return typedValue.data
+    }
 
-        // --- Shizuku ---
-        val shizukuStatus = view.findViewById<TextView>(R.id.tvShizukuPermStatus)
-        val shizukuBtn = view.findViewById<Button>(R.id.btnGrantShizuku)
+    private fun copyToClipboard(text: String) {
+        val clipboard = context?.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("ADB Command", text)
+        clipboard.setPrimaryClip(clip)
+    }
+
+    private fun refreshUI() {
+        val ctx = context ?: return
+        container.removeAllViews()
+        val pkg = ctx.packageName
+        
+        val primaryPurple = getThemeColor(com.google.android.material.R.attr.colorPrimary)
+
         val shizukuInstalled = isPackageInstalled("moe.shizuku.privileged.api")
         val shizukuRunning = try { Shizuku.pingBinder() } catch (e: Exception) { false }
-        val shizukuGranted = try {
-            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (e: Exception) { false }
-
-        shizukuStatus.text = when {
-            !shizukuInstalled -> "Shizuku: Not installed"
-            !shizukuRunning   -> "Shizuku: Not running"
-            !shizukuGranted   -> "Shizuku: Permission not granted"
-            else              -> "Shizuku: Granted"
-        }
-        shizukuStatus.setTextColor(if (shizukuGranted) 0xFF00CC00.toInt() else 0xFFCC0000.toInt())
-        shizukuBtn.text = when {
-            !shizukuInstalled -> "Install Shizuku"
-            !shizukuRunning   -> "Open Shizuku"
-            !shizukuGranted   -> "Grant Permission"
-            else              -> "Granted"
-        }
-        shizukuBtn.isEnabled = !shizukuGranted || !shizukuRunning || !shizukuInstalled
-        shizukuBtn.setOnClickListener {
-            when {
-                !shizukuInstalled -> startActivity(
-                    Intent(Intent.ACTION_VIEW,
-                        Uri.parse("market://details?id=moe.shizuku.privileged.api"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                !shizukuRunning -> ctx.packageManager
-                    .getLaunchIntentForPackage("moe.shizuku.privileged.api")
-                    ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    ?.let { startActivity(it) }
-                !shizukuGranted -> try {
-                    Shizuku.requestPermission(1001)
-                } catch (e: Exception) {
-                    LogBuffer.log("Failed to request Shizuku permission: ${e.message}")
-                }
-            }
-        }
-
-        // --- Notifications ---
-        val notifStatus = view.findViewById<TextView>(R.id.tvNotifPermStatus)
-        val notifBtn = view.findViewById<Button>(R.id.btnGrantNotif)
-        val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
-        } else true
-
-        notifStatus.text = if (notifGranted) "Notifications: Granted" else "Notifications: Not granted"
-        notifStatus.setTextColor(if (notifGranted) 0xFF00CC00.toInt() else 0xFFCC0000.toInt())
-        notifBtn.text = if (notifGranted) "Granted" else "Grant Permission"
-        notifBtn.isEnabled = !notifGranted
-        notifBtn.setOnClickListener {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 2001)
-            }
-        }
-
-        // --- Display over other apps ---
-        val overlayStatus = view.findViewById<TextView>(R.id.tvOverlayPermStatus)
-        val overlayBtn = view.findViewById<Button>(R.id.btnGrantOverlay)
-        val overlayGranted = Settings.canDrawOverlays(ctx)
-
-        overlayStatus.text = if (overlayGranted) "Display over apps: Granted" else "Display over apps: Not granted"
-        overlayStatus.setTextColor(if (overlayGranted) 0xFF00CC00.toInt() else 0xFFCC0000.toInt())
-        overlayBtn.text = if (overlayGranted) "Granted" else "Grant Permission"
-        overlayBtn.isEnabled = !overlayGranted
-        overlayBtn.setOnClickListener {
-            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:${ctx.packageName}"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }
-
-        // --- Battery optimisation ---
-        val batteryStatus = view.findViewById<TextView>(R.id.tvBatteryPermStatus)
-        val batteryBtn = view.findViewById<Button>(R.id.btnGrantBattery)
-        val pm = ctx.getSystemService(android.os.PowerManager::class.java)
-        val batteryOptIgnored = pm.isIgnoringBatteryOptimizations(ctx.packageName)
-
-        batteryStatus.text = if (batteryOptIgnored)
-            "Battery Optimisation: Unrestricted"
-        else
-            "Battery Optimisation: Restricted"
-        batteryStatus.setTextColor(if (batteryOptIgnored) 0xFF00CC00.toInt() else 0xFFCC0000.toInt())
-        batteryBtn.text = if (batteryOptIgnored) "Unrestricted" else "Set Unrestricted"
-        batteryBtn.isEnabled = !batteryOptIgnored
-        batteryBtn.setOnClickListener {
-            AlertDialog.Builder(ctx)
-                .setTitle("Battery Optimisation")
-                .setMessage("This will open Battery settings. Set TBP Android to Unrestricted.")
-                .setPositiveButton("Open Settings") { _, _ ->
-                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                        Uri.parse("package:${ctx.packageName}"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
-
-        // --- Write Secure Settings ---
-        val secureStatus = view.findViewById<TextView>(R.id.tvSecureSettingsStatus)
-        val secureBtn = view.findViewById<Button>(R.id.btnGrantSecureSettings)
-        val hasSecureSettings = ctx.checkSelfPermission(
-            "android.permission.WRITE_SECURE_SETTINGS"
-        ) == PackageManager.PERMISSION_GRANTED
-
-        secureStatus.text = if (hasSecureSettings)
-            "Write Secure Settings: Granted (WiFi toggle enabled)"
-        else
-            "Write Secure Settings: Not granted (WiFi toggle disabled in recovery)"
-        secureStatus.setTextColor(if (hasSecureSettings) 0xFF00CC00.toInt() else 0xFFCC0000.toInt())
-        secureBtn.text = if (hasSecureSettings) "Granted" else "Grant via Shizuku"
-        secureBtn.isEnabled = !hasSecureSettings && shizukuGranted
-        secureBtn.setOnClickListener {
-            try {
-                val rish = File(ctx.filesDir, "rish").absolutePath
-                val process = ProcessBuilder(
-                    "sh", rish, "-c",
-                    "pm grant com.onder1e.usbpdbs android.permission.WRITE_SECURE_SETTINGS"
-                ).redirectErrorStream(true).start()
-                val output = process.inputStream.bufferedReader().readText()
-                process.waitFor()
-                LogBuffer.log("Grant WRITE_SECURE_SETTINGS: ${output.ifBlank { "OK" }}")
-                Toast.makeText(ctx, "Write Secure Settings granted", Toast.LENGTH_SHORT).show()
-                setupPermissions(view)
-            } catch (e: Exception) {
-                Toast.makeText(ctx, "Failed: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-        }
-
-        // --- WiFi section removed from here ---
-
-        // --- Rish Setup ---
-        val rishStatus = view.findViewById<TextView>(R.id.tvRishStatus)
-        val rishBtn = view.findViewById<Button>(R.id.btnCopyRish)
+        val shizukuGranted = try { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED } catch (e: Exception) { false }
         val rishFile = File(ctx.filesDir, "rish")
-        val rishDexFile = File(ctx.filesDir, "rish_shizuku.dex")
-        val rishReady = rishFile.exists() && rishDexFile.exists()
+        val rishReady = rishFile.exists() && File(ctx.filesDir, "rish_shizuku.dex").exists()
 
-        rishStatus.text = if (rishReady) "Rish: Ready" else "Rish: Not set up"
-        rishStatus.setTextColor(if (rishReady) 0xFF00CC00.toInt() else 0xFFCC0000.toInt())
-        rishBtn.text = if (rishReady) "Re-copy Rish" else "Copy Rish from /sdcard"
-        rishBtn.setOnClickListener {
+        // 1. Setup
+        addSetupSection("Shizuku", if (shizukuGranted) "Active" else "Setup Required", shizukuGranted, primaryPurple) {
+            if (!shizukuInstalled) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=moe.shizuku.privileged.api")))
+            else if (!shizukuRunning) ctx.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")?.let { startActivity(it) }
+            else Shizuku.requestPermission(1001)
+        }
+
+        addSetupSection("Rish Bridge", if (rishReady) "Ready" else "Missing Assets", rishReady, primaryPurple) {
             try {
-                val destRish = File(ctx.filesDir, "rish").absolutePath
-                val destDex = File(ctx.filesDir, "rish_shizuku.dex").absolutePath
-
-                val setupCmd = "mkdir -p ${ctx.filesDir.absolutePath} && " +
-                        "cp /sdcard/rish /data/local/tmp/rish && " +
-                        "cp /sdcard/rish_shizuku.dex /data/local/tmp/rish_shizuku.dex && " +
-                        "chmod 666 /data/local/tmp/rish* && " +
-                        "cp /data/local/tmp/rish $destRish && " +
-                        "cp /data/local/tmp/rish_shizuku.dex $destDex && " +
-                        "chmod 755 $destRish && " +
-                        "chmod 644 $destDex && " +
-                        "rm /data/local/tmp/rish /data/local/tmp/rish_shizuku.dex"
-
-                val process = ProcessBuilder("sh", "-c", setupCmd).redirectErrorStream(true).start()
-                val output = process.inputStream.bufferedReader().readText().trim()
-                process.waitFor()
-
-                if (rishFile.exists() && rishDexFile.exists()) {
-                    Toast.makeText(ctx, "Rish setup successful", Toast.LENGTH_SHORT).show()
-                    setupPermissions(view)
-                } else {
-                    Toast.makeText(ctx, "Setup failed: $output", Toast.LENGTH_LONG).show()
+                listOf("rish", "rish_shizuku.dex").forEach { name ->
+                    ctx.assets.open(name).use { input -> File(ctx.filesDir, name).outputStream().use { input.copyTo(it) } }
                 }
+                File(ctx.filesDir, "rish").setExecutable(true, false)
+                refreshUI()
+            } catch (e: Exception) { Toast.makeText(ctx, "Extraction failed", Toast.LENGTH_SHORT).show() }
+        }
+
+        // 2. Items
+        val items = mutableListOf<PermissionItem>()
+
+        val secureCmd = "adb shell pm grant $pkg android.permission.WRITE_SECURE_SETTINGS"
+        items.add(PermissionItem("Write Secure Settings", 
+            ctx.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") == PackageManager.PERMISSION_GRANTED, 
+            true, secureCmd) {
+            if (rishReady && shizukuGranted) runRish("pm grant $pkg android.permission.WRITE_SECURE_SETTINGS")
+            else { copyToClipboard(secureCmd); Toast.makeText(ctx, "Use ADB or setup rish, command copied", Toast.LENGTH_LONG).show() }
+        })
+
+        val termuxCmd = "adb shell pm grant $pkg com.termux.permission.RUN_COMMAND"
+        items.add(PermissionItem("Termux Command", 
+            ctx.checkSelfPermission("com.termux.permission.RUN_COMMAND") == PackageManager.PERMISSION_GRANTED, 
+            true, termuxCmd) {
+            if (rishReady && shizukuGranted) runRish("pm grant $pkg com.termux.permission.RUN_COMMAND")
+            else { copyToClipboard(termuxCmd); Toast.makeText(ctx, "Use ADB or setup rish, command copied", Toast.LENGTH_LONG).show() }
+        })
+
+        items.add(PermissionItem("Display Over Other Apps", Settings.canDrawOverlays(ctx), true) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$pkg")))
+        })
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            items.add(PermissionItem("Notifications", 
+                ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED, true) {
+                requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            })
+        }
+
+        val powerManager = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+        items.add(PermissionItem("Battery Unrestricted", powerManager.isIgnoringBatteryOptimizations(pkg), false) {
+            try {
+                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$pkg")))
             } catch (e: Exception) {
-                Toast.makeText(ctx, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             }
+        })
+
+        val sortedItems = items.sortedBy { it.isGranted }
+
+        // 3. Grant All Button
+        if (rishReady && shizukuGranted && sortedItems.any { !it.isGranted && it.canBeGrantedViaRish }) {
+            val btnAll = Button(ctx).apply {
+                text = "Grant All via Shizuku"
+                setTextColor(darkGreyText) // Matches Main UI
+                backgroundTintList = ColorStateList.valueOf(primaryPurple)
+                setOnClickListener {
+                    val cmds = mutableListOf<String>()
+                    if (ctx.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") != PackageManager.PERMISSION_GRANTED)
+                        cmds.add("pm grant $pkg android.permission.WRITE_SECURE_SETTINGS")
+                    if (ctx.checkSelfPermission("com.termux.permission.RUN_COMMAND") != PackageManager.PERMISSION_GRANTED)
+                        cmds.add("pm grant $pkg com.termux.permission.RUN_COMMAND")
+                    if (!Settings.canDrawOverlays(ctx))
+                        cmds.add("cmd appops set $pkg SYSTEM_ALERT_WINDOW allow")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && 
+                        ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                        cmds.add("pm grant $pkg android.permission.POST_NOTIFICATIONS")
+                    
+                    if (cmds.isNotEmpty()) runRish(cmds.joinToString(" && "))
+                }
+            }
+            container.addView(btnAll)
+            addSeparator()
+        }
+
+        // 4. Render Rows
+        sortedItems.forEach { item ->
+            val tv = TextView(ctx).apply {
+                text = "${item.title}: ${if (item.isGranted) "Granted" else "Missing"}"
+                setTextColor(if (item.isGranted) 0xFF00CC00.toInt() else 0xFFCC0000.toInt())
+                setPadding(0, 20, 0, 5)
+                typeface = Typeface.DEFAULT_BOLD
+            }
+            val btn = Button(ctx).apply {
+                text = if (item.isGranted) "Granted" else "Fix ${item.title}"
+                isEnabled = !item.isGranted
+                // Logic: Dark text on Purple, White text on Grey
+                setTextColor(if (item.isGranted) whiteText else darkGreyText)
+                backgroundTintList = ColorStateList.valueOf(if (item.isGranted) disabledBg else primaryPurple)
+                setOnClickListener { item.action() }
+            }
+            container.addView(tv)
+            container.addView(btn)
         }
     }
 
-    private fun isPackageInstalled(pkg: String): Boolean {
-        return try {
-            requireContext().packageManager.getPackageInfo(pkg, 0)
-            true
-        } catch (e: Exception) { false }
+    private fun addSetupSection(title: String, status: String, granted: Boolean, purple: Int, action: () -> Unit) {
+        val ctx = context ?: return
+        val tv = TextView(ctx).apply {
+            text = "$title: $status"
+            setTextColor(if (granted) 0xFF00CC00.toInt() else 0xFFCC0000.toInt())
+            setPadding(0, 10, 0, 0)
+        }
+        val btn = Button(ctx).apply {
+            text = if (granted) "$title Active" else "Setup $title"
+            isEnabled = !granted
+            setTextColor(if (granted) whiteText else darkGreyText)
+            backgroundTintList = ColorStateList.valueOf(if (granted) disabledBg else purple)
+            setOnClickListener { action() }
+        }
+        container.addView(tv)
+        container.addView(btn)
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        view?.let { setupPermissions(it) }
+    private fun runRish(cmd: String) {
+        try {
+            val rish = File(requireContext().filesDir, "rish").absolutePath
+            ProcessBuilder("sh", rish, "-c", cmd).start().waitFor()
+            refreshUI()
+        } catch (e: Exception) {
+            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
+
+    private fun addSeparator() {
+        val v = View(context).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 3)
+            setBackgroundColor(0x33000000.toInt())
+        }
+        (v.layoutParams as LinearLayout.LayoutParams).setMargins(0, 30, 0, 30)
+        container.addView(v)
+    }
+
+    private fun isPackageInstalled(pkg: String) = try {
+        requireContext().packageManager.getPackageInfo(pkg, 0); true
+    } catch (e: Exception) { false }
 }
