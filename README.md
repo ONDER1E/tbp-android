@@ -59,18 +59,6 @@ Instead of polling every 5 seconds, the app registers for Android's `ACTION_BATT
 
 -----
 
-## Initial Setup (Required)
-
-To enable "Self-Healing" and allow the app to work without a PC:
-
-1.  **Rish Files:** Place `rish` and `rish_shizuku.dex` in the root of your `/sdcard/`.
-2.  **Permissions Tab:**
-      - Tap **Copy Rish from /sdcard** to move them to internal storage.
-      - Tap **Grant via Shizuku** under Write Secure Settings.
-3.  **Battery:** Set usb pd bd to **Unrestricted** battery usage.
-
------
-
 ## Device Compatibility
 
 This app uses the same `pass_through` system setting as the original shell scripts.
